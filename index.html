@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3D自动装柜原型</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="panel">
+        <h1>自动 3D 装柜</h1>
+
+        <section>
+          <h2>1) 集装箱参数</h2>
+          <label>
+            标准柜型
+            <select id="containerPreset">
+              <option value="40HC" selected>40HC</option>
+            </select>
+          </label>
+          <div class="grid-3">
+            <label>内长(mm)<input id="containerL" type="number" value="12032" /></label>
+            <label>内宽(mm)<input id="containerW" type="number" value="2352" /></label>
+            <label>内高(mm)<input id="containerH" type="number" value="2698" /></label>
+          </div>
+          <label>
+            限重(kg)
+            <input id="containerMaxWeight" type="number" value="26000" />
+          </label>
+        </section>
+
+        <section>
+          <h2>2) 产品与托盘规则</h2>
+          <div class="grid-2">
+            <label>高度几层<input id="heightLayers" type="number" min="1" value="3" /></label>
+            <label>宽度几段<input id="widthSegments" type="number" min="1" value="2" /></label>
+          </div>
+          <div class="grid-2">
+            <label>
+              几高是否可调整
+              <select id="heightFlexible">
+                <option value="no">不可调整</option>
+                <option value="yes" selected>可调整</option>
+              </select>
+            </label>
+            <label>
+              几宽是否可调整
+              <select id="widthFlexible">
+                <option value="no">不可调整</option>
+                <option value="yes" selected>可调整</option>
+              </select>
+            </label>
+          </div>
+          <label>
+            不可行时策略
+            <select id="fallbackStrategy">
+              <option value="auto" selected>自动选择最佳可行方案</option>
+              <option value="strict">严格按当前层宽（不可行则报错）</option>
+              <option value="oneWide">改为1宽平放</option>
+              <option value="mixed">改为横+竖混装（1横+1竖）</option>
+            </select>
+          </label>
+
+          <div id="productList"></div>
+          <button id="addProductBtn" type="button">+ 新增产品</button>
+          <button id="buildPalletBtn" type="button">生成托盘尺寸与3D色块</button>
+        </section>
+
+        <section>
+          <h2>3) 装柜方式</h2>
+          <div class="radios">
+            <label><input type="radio" name="mode" value="auto" checked /> 自动装柜</label>
+            <label><input type="radio" name="mode" value="manual" /> 自主拖拽</label>
+          </div>
+          <button id="runBtn" type="button">执行当前方式</button>
+        </section>
+
+        <section>
+          <h2>结果</h2>
+          <div id="summary"></div>
+          <p id="status" class="status">等待操作</p>
+        </section>
+      </aside>
+
+      <main class="viewer-wrap">
+        <div id="viewer"></div>
+      </main>
+    </div>
+
+    <dialog id="addProductDialog" class="modal">
+      <form id="addProductForm" method="dialog">
+        <h3>新增产品</h3>
+        <div class="grid-2">
+          <label>名称<input id="newName" type="text" value="新产品" required /></label>
+          <label>颜色<input id="newColor" type="color" value="#3f8efc" /></label>
+        </div>
+        <div class="grid-3">
+          <label>长(mm)<input id="newL" type="number" min="1" value="600" required /></label>
+          <label>宽(mm)<input id="newW" type="number" min="1" value="400" required /></label>
+          <label>高(mm)<input id="newH" type="number" min="1" value="300" required /></label>
+        </div>
+        <div class="grid-2">
+          <label>总件数(件)<input id="newQty" type="number" min="1" value="120" required /></label>
+          <label>
+            输入方式
+            <select id="newMassMode">
+              <option value="density" selected>输入密度(kg/m³)</option>
+              <option value="unitWeight">输入单件重量(kg)</option>
+            </select>
+          </label>
+        </div>
+        <div class="grid-2">
+          <label id="densityWrap">密度(kg/m³)<input id="newDensity" type="number" min="1" value="180" /></label>
+          <label id="weightWrap" class="hidden">单件重量(kg)<input id="newUnitWeight" type="number" min="0.001" step="0.001" value="13" /></label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="cancelAddBtn" class="btn-ghost">取消</button>
+          <button type="submit">保存并计算装拖</button>
+        </div>
+      </form>
+    </dialog>
+
+    <template id="productRowTpl">
+      <div class="product-row">
+        <div class="row-head">
+          <strong class="product-title">产品</strong>
+          <button type="button" class="remove-btn">删除</button>
+        </div>
+        <div class="grid-2">
+          <label>名称<input class="p-name" type="text" /></label>
+          <label>颜色<input class="p-color" type="color" value="#3f8efc" /></label>
+        </div>
+        <div class="grid-4">
+          <label>长(mm)<input class="p-l" type="number" min="1" value="600" /></label>
+          <label>宽(mm)<input class="p-w" type="number" min="1" value="400" /></label>
+          <label>高(mm)<input class="p-h" type="number" min="1" value="300" /></label>
+          <label>密度(kg/m³)<input class="p-density" type="number" min="1" value="180" /></label>
+        </div>
+        <label>总件数(件)<input class="p-qty" type="number" min="1" value="120" /></label>
+      </div>
+    </template>
+
+    <script type="module" src="app.js?v=20260301-14"></script>
+    <script>
+      window.addEventListener("DOMContentLoaded", function () {
+        function parseNum(v, d) {
+          var n = Number(v);
+          return Number.isFinite(n) ? n : d;
+        }
+
+        function mmToM(v) {
+          return v / 1000;
+        }
+
+        function getRows() {
+          return Array.prototype.slice.call(document.querySelectorAll(".product-row"));
+        }
+
+        function getBestPackingDims(l, w, h, palletW, usableProductH) {
+          var dims = [Math.max(1, l), Math.max(1, w), Math.max(1, h)].sort(function (a, b) { return a - b; });
+          var lengthDim = dims[2];
+          var d1 = dims[0];
+          var d2 = dims[1];
+
+          function score(widthDim, heightDim) {
+            var unitsAlongW = Math.floor(palletW / widthDim);
+            var unitsAlongH = Math.floor(usableProductH / heightDim);
+            return {
+              lengthDim: lengthDim,
+              unitsAlongW: unitsAlongW,
+              unitsAlongH: unitsAlongH,
+              units: Math.max(0, unitsAlongW * unitsAlongH)
+            };
+          }
+
+          var a = score(d1, d2);
+          var b = score(d2, d1);
+          return a.units >= b.units ? a : b;
+        }
+
+        function renderFallbackBlocks(plans) {
+          var viewer = document.getElementById("viewer");
+          if (!viewer) return;
+          var old = viewer.querySelector(".fallback-scene");
+          if (old) old.remove();
+
+          if (!plans.length) return;
+          var scene = document.createElement("div");
+          scene.className = "fallback-scene";
+          plans.slice(0, 14).forEach(function (p) {
+            var b = document.createElement("div");
+            b.className = "fallback-block";
+            if (p.mixedOrientation) b.classList.add("mixed");
+            b.title = p.name + " " + Math.round(p.palletL) + "x" + Math.round(p.palletW) + "x" + Math.round(p.palletH);
+            b.style.width = Math.max(50, Math.min(320, p.palletL * 0.04)) + "px";
+            b.style.height = Math.max(24, Math.min(120, p.palletH * 0.05)) + "px";
+            b.style.background = p.color;
+            scene.appendChild(b);
+          });
+          viewer.appendChild(scene);
+        }
+
+        function buildFallback() {
+          var rows = getRows();
+          var layers = Math.max(1, Math.floor(parseNum(document.getElementById("heightLayers").value, 3)));
+          var segs = Math.max(1, Math.floor(parseNum(document.getElementById("widthSegments").value, 2)));
+          var summary = document.getElementById("summary");
+          var status = document.getElementById("status");
+          var baseH = 100;
+          var palletSelf = 70;
+          var plans = [];
+          var containerPalletCount = 0;
+          var containerWeight = 0;
+          var containerL = parseNum(document.getElementById("containerL").value, 12032);
+          var containerW = parseNum(document.getElementById("containerW").value, 2352);
+          var containerH = parseNum(document.getElementById("containerH").value, 2698);
+          var containerMaxWeight = parseNum(document.getElementById("containerMaxWeight").value, 26000);
+          var heightFlexible = ((document.getElementById("heightFlexible") && document.getElementById("heightFlexible").value) || "yes") === "yes";
+          var widthFlexible = ((document.getElementById("widthFlexible") && document.getElementById("widthFlexible").value) || "yes") === "yes";
+          var strategy = (document.getElementById("fallbackStrategy") && document.getElementById("fallbackStrategy").value) || "auto";
+          if (!heightFlexible && !widthFlexible) strategy = "strict";
+
+          rows.forEach(function (row, i) {
+            var name = (row.querySelector(".p-name").value || ("产品" + (i + 1))).trim();
+            var color = row.querySelector(".p-color").value || "#3f8efc";
+            var l = Math.max(1, parseNum(row.querySelector(".p-l").value, 600));
+            var w = Math.max(1, parseNum(row.querySelector(".p-w").value, 400));
+            var h = Math.max(1, parseNum(row.querySelector(".p-h").value, 300));
+            var density = Math.max(1, parseNum(row.querySelector(".p-density").value, 180));
+            var qty = Math.max(1, Math.floor(parseNum(row.querySelector(".p-qty").value, 120)));
+
+            var unitVol = mmToM(l) * mmToM(w) * mmToM(h);
+            var unitWeight = unitVol * density;
+            var dims = [Math.max(1, l), Math.max(1, w), Math.max(1, h)].sort(function (a, b) { return a - b; });
+            var thickness = dims[0];
+            var face = dims[1];
+            var lengthDim = dims[2];
+
+            function calcCandidate(segCand, layerCand, modeCand) {
+              var palletH = containerH / layerCand;
+              var usableProductH = Math.max(0, palletH - baseH);
+              var flatPerStack = Math.floor(usableProductH / thickness);
+              var verticalPerStack = Math.floor(usableProductH / face);
+              var flatWidthNeed = segCand * face;
+              var unitsPerPalletRaw = 0;
+              var palletWUsed = 0;
+              var reason = "";
+              var mixed = modeCand === "mixed";
+              if (modeCand === "flat" && flatWidthNeed <= containerW && flatPerStack > 0) {
+                unitsPerPalletRaw = segCand * flatPerStack;
+                palletWUsed = flatWidthNeed;
+              } else if (modeCand === "mixed" && segCand === 2 && face + thickness <= containerW && flatPerStack > 0 && verticalPerStack > 0) {
+                unitsPerPalletRaw = flatPerStack + verticalPerStack;
+                palletWUsed = face + thickness;
+              } else {
+                reason = modeCand === "flat"
+                  ? (flatWidthNeed > containerW ? ("宽度无法放下 " + segCand + " 宽平放（需要" + flatWidthNeed + "mm, 柜宽" + containerW + "mm）") : "高度不足以装片")
+                  : ("横+竖混装不可行（需要" + (face + thickness) + "mm, 柜宽" + containerW + "mm）");
+              }
+
+              var unitsPerPallet = Math.max(1, unitsPerPalletRaw);
+              var palletsNeeded = unitsPerPalletRaw > 0 ? Math.max(1, Math.ceil(qty / unitsPerPalletRaw)) : 0;
+              var fullPalletWeight = unitsPerPallet * unitWeight + palletSelf;
+              var maxByLen = Math.max(0, Math.floor(containerL / lengthDim));
+              var maxByWid = palletWUsed > 0 ? Math.floor(containerW / palletWUsed) : 0;
+              var maxByHei = palletH > 0 ? Math.floor(containerH / palletH) : 0;
+              var maxBySpace = unitsPerPalletRaw > 0 ? maxByLen * maxByWid * maxByHei : 0;
+              var maxByWeight = fullPalletWeight > 0 ? Math.max(0, Math.floor(containerMaxWeight / fullPalletWeight)) : 0;
+              var maxPalletsInContainer = unitsPerPalletRaw > 0 ? Math.min(maxBySpace, maxByWeight) : 0;
+              var maxPcsInContainer = maxPalletsInContainer * unitsPerPallet;
+              var loadablePalletsForQty = Math.min(maxPalletsInContainer, palletsNeeded);
+              return {
+                seg: segCand,
+                layers: layerCand,
+                mode: modeCand,
+                mixedOrientation: mixed,
+                reason: reason,
+                unitsPerPalletRaw: unitsPerPalletRaw,
+                unitsPerPallet: unitsPerPallet,
+                maxPalletsInContainer: maxPalletsInContainer,
+                maxPcsInContainer: maxPcsInContainer,
+                loadablePalletsForQty: loadablePalletsForQty,
+                fullPalletWeight: fullPalletWeight,
+                palletL: lengthDim,
+                palletW: palletWUsed,
+                palletH: palletH
+              };
+            }
+
+            var baseFlat = calcCandidate(segs, layers, "flat");
+            var oneWide = calcCandidate(1, layers, "flat");
+            var mixed = calcCandidate(2, layers, "mixed");
+            var layerOptions = [];
+            var segOptions = [];
+            if (heightFlexible) {
+              for (var li = 1; li <= layers; li += 1) layerOptions.push(li);
+            } else {
+              layerOptions.push(layers);
+            }
+            if (widthFlexible) {
+              for (var si = 1; si <= segs; si += 1) segOptions.push(si);
+            } else {
+              segOptions.push(segs);
+            }
+            var candidates = [];
+            if (strategy === "strict") candidates = [baseFlat];
+            if (strategy === "oneWide") candidates = (widthFlexible || segs === 1) ? [oneWide] : [baseFlat];
+            if (strategy === "mixed") candidates = (widthFlexible || segs === 2) ? [mixed] : [baseFlat];
+            if (strategy === "auto") {
+              for (var lli = 0; lli < layerOptions.length; lli += 1) {
+                var ll = layerOptions[lli];
+                for (var ssi = 0; ssi < segOptions.length; ssi += 1) {
+                  var ss = segOptions[ssi];
+                  candidates.push(calcCandidate(ss, ll, "flat"));
+                }
+                if (segOptions.indexOf(2) !== -1) candidates.push(calcCandidate(2, ll, "mixed"));
+              }
+            }
+            var valid = candidates.filter(function (c) { return c.unitsPerPalletRaw > 0; });
+            var chosen = (valid.length ? valid : candidates).sort(function (a, b) {
+              if (b.maxPcsInContainer !== a.maxPcsInContainer) return b.maxPcsInContainer - a.maxPcsInContainer;
+              return b.unitsPerPallet - a.unitsPerPallet;
+            })[0];
+
+            var unitsPerPallet = chosen.unitsPerPallet;
+            var loadablePalletsForQty = chosen.loadablePalletsForQty;
+
+            var remain = qty;
+            for (var n = 0; n < loadablePalletsForQty; n += 1) {
+              var thisUnits = Math.max(1, Math.min(unitsPerPallet, remain));
+              containerWeight += thisUnits * unitWeight + palletSelf;
+              remain -= thisUnits;
+              containerPalletCount += 1;
+            }
+
+            plans.push({
+              name: name,
+              color: color,
+              unitsPerPallet: chosen.unitsPerPallet,
+              unitsPerPalletRaw: chosen.unitsPerPalletRaw,
+              maxPalletsInContainer: chosen.maxPalletsInContainer,
+              maxPcsInContainer: chosen.maxPcsInContainer,
+              palletL: chosen.palletL,
+              palletW: chosen.palletW,
+              palletH: chosen.palletH,
+              fullPalletWeight: chosen.fullPalletWeight,
+              mode: chosen.mode,
+              mixedOrientation: chosen.mixedOrientation,
+              reason: chosen.reason,
+              seg: chosen.seg,
+              layers: chosen.layers,
+              suggestion: (!baseFlat.unitsPerPalletRaw ? ("目标" + segs + "宽不可行") : "") +
+                (oneWide.unitsPerPalletRaw ? ("；可改1宽(每托" + oneWide.unitsPerPallet + "片)") : "") +
+                (mixed.unitsPerPalletRaw ? ("；可用横+竖(每托" + mixed.unitsPerPallet + "片)") : "")
+            });
+          });
+
+          var rowsHtml = plans.map(function (p) {
+            return "<tr><td>" + p.name + "</td><td>" +
+              Math.round(p.palletL) + " x " + Math.round(p.palletW) + " x " + Math.round(p.palletH) +
+              "</td><td>" + p.unitsPerPallet + "</td><td>" + p.maxPalletsInContainer + "</td><td>" + p.maxPcsInContainer +
+              "</td><td>" + p.fullPalletWeight.toFixed(1) +
+              "</td><td>" + (p.unitsPerPalletRaw > 0 ? (p.layers + "高" + p.seg + "宽-" + (p.mode === "mixed" ? "混装(横+竖)" : "平放") + (p.suggestion || "")) : (p.reason + (p.suggestion || ""))) + "</td></tr>";
+          }).join("");
+
+          if (summary) {
+            summary.innerHTML =
+              "<div>整柜装托数: <strong>" + containerPalletCount + "</strong> 托</div>" +
+              "<div>整柜总重量: <strong>" + containerWeight.toFixed(1) + " kg</strong></div>" +
+              "<table class='summary-table'><thead><tr><th>产品</th><th>托盘尺寸(mm)</th><th>pc/托</th><th>最多可装(托/柜)</th><th>总共pcs/柜</th><th>一托重量(kg,含托盘)</th><th>检查</th></tr></thead><tbody>" +
+              rowsHtml + "</tbody></table>";
+          }
+          var widthFail = plans.filter(function (p) { return !p.unitsPerPalletRaw && p.reason.indexOf("宽度无法放下") === 0; });
+          if (status) {
+            if (widthFail.length) {
+              status.textContent = widthFail.map(function (p) {
+                return p.name + ": " + p.reason + (p.suggestion ? ("；建议：" + p.suggestion.replace(/^；/, "")) : "");
+              }).join(" | ");
+            } else {
+              status.textContent = "已完成最大可装能力计算（最多托数 / pc每托 / pcs每柜）。";
+            }
+          }
+          renderFallbackBlocks(plans);
+        }
+
+        var btn = document.getElementById("addProductBtn");
+        if (btn) btn.addEventListener("click", function () {
+          if (typeof window.__openAddProductDialog === "function") {
+            window.__openAddProductDialog();
+            return;
+          }
+
+          var tpl = document.getElementById("productRowTpl");
+          var list = document.getElementById("productList");
+          if (!tpl || !list) return;
+
+          var name = window.prompt("产品名称", "新产品");
+          if (!name) return;
+          var l = window.prompt("长(mm)", "600") || "600";
+          var w = window.prompt("宽(mm)", "400") || "400";
+          var h = window.prompt("高(mm)", "300") || "300";
+          var density = window.prompt("密度(kg/m³)", "180") || "180";
+          var qty = window.prompt("总件数", "120") || "120";
+
+          var frag = tpl.content.cloneNode(true);
+          var row = frag.querySelector(".product-row");
+          row.querySelector(".p-name").value = name.trim();
+          row.querySelector(".p-l").value = l;
+          row.querySelector(".p-w").value = w;
+          row.querySelector(".p-h").value = h;
+          row.querySelector(".p-density").value = density;
+          row.querySelector(".p-qty").value = qty;
+          list.appendChild(frag);
+
+          var buildBtn = document.getElementById("buildPalletBtn");
+          if (buildBtn) buildBtn.click();
+        });
+
+        var buildBtn = document.getElementById("buildPalletBtn");
+        if (buildBtn) buildBtn.addEventListener("click", function () {
+          if (typeof window.__handleBuildPallets === "function") {
+            window.__handleBuildPallets();
+            return;
+          }
+          buildFallback();
+        });
+
+        var hFlexSel = document.getElementById("heightFlexible");
+        var wFlexSel = document.getElementById("widthFlexible");
+        var strategySel = document.getElementById("fallbackStrategy");
+        function syncFlexUI() {
+          if (!hFlexSel || !wFlexSel || !strategySel) return;
+          strategySel.disabled = hFlexSel.value === "no" && wFlexSel.value === "no";
+        }
+        if (hFlexSel && wFlexSel) {
+          hFlexSel.addEventListener("change", syncFlexUI);
+          wFlexSel.addEventListener("change", syncFlexUI);
+          syncFlexUI();
+        }
+      });
+    </script>
+  </body>
+</html>
